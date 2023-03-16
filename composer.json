@@ -1,0 +1,18 @@
+{
+    "name": "francoisjun/metabase-embed",
+    "description": "Plugin Wordpress para incorporar dashboards do Metabase através de Shortcode",
+    "type": "project",
+    "require": {
+        "firebase/php-jwt": "^6.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "Francoisjun\\MetabaseEmbed\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "François Júnior"
+        }
+    ]
+}
