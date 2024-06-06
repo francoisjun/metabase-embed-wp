@@ -4,7 +4,7 @@
  * Plugin Name:       Metabase Embed
  * Plugin URI:        https://github.com/francoisjun/metabase-embed-wp/
  * Description:       Shortcode para incorporar dashboards do Metabase.
- * Version:           1.0.0
+ * Version:           1.0.1
  * Requires PHP:	  7.1
  * Author:            François Júnior
  * Author URI:        https://github.com/francoisjun/
@@ -156,7 +156,7 @@ function metabase_embed_shortcode( $atts ) {
     $token      = JWT::encode($payload, $secret_key, 'HS256');
     $iframeUrl  = $site_url . "/embed/dashboard/" . $token . metabase_embed_get_view_params($atts);
 
-	return '<div class="wrap"><iframe src="'.$iframeUrl.'" frameborder="0" width="'.$atts['width'].'" height="'.$atts['height'].'" allowtransparency></iframe></div>';
+	return '<iframe src="'.$iframeUrl.'" frameborder="0" width="'.$atts['width'].'" height="'.$atts['height'].'" loading="lazy" allowtransparency="true"></iframe>';
 }
 add_shortcode('metabase-embed', 'metabase_embed_shortcode');
 
