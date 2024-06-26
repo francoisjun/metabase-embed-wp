@@ -4,7 +4,7 @@
  * Plugin Name:       Metabase Embed
  * Plugin URI:        https://github.com/francoisjun/metabase-embed-wp/
  * Description:       Shortcode para incorporar dashboards do Metabase.
- * Version:           1.0.1
+ * Version:           1.0.2
  * Requires PHP:	  7.1
  * Author:            François Júnior
  * Author URI:        https://github.com/francoisjun/
@@ -115,8 +115,9 @@ function metabase_embed_settings_help_html() {
 	<p>filter (default: null) -> filtros a serem passados pela URL no padrão <strong>chave=valor</strong>. Separe os filtros com o caracter <strong>&</strong></p>
 	<p>width (default: 100%) -> largura em pixels do dashboard</p>
 	<p>height (default: 600) -> altura em pixels do dashboard</p>
+	<p>name (default: '') -> nome que será inserido no atributo <strong>id</strong> do iFrame</p>
 	<h4>Exemplo completo</h4>
-	<pre>[metabase-embed id=2 width=800 height=400 border=false title=true theme=night filter="city=Florence&state=CD"]</pre>
+	<pre>[metabase-embed id=2 width=800 height=400 border=false title=true theme=night filter="city=Florence&state=CD" name="meuIframe"]</pre>
 	<?php
 }
 
@@ -134,12 +135,13 @@ function metabase_embed_shortcode( $atts ) {
     $atts = array_change_key_case((array) $atts, CASE_LOWER);
 	$atts = shortcode_atts(
 		array('id' => 1, 
-			  'width' => "100%", 
+			  'width'  => "100%", 
 			  'height' => 600,
 			  'border' => 'true',
-			  'title' => 'true',
-			  'theme' => null,
-			  'filter' => null
+			  'title'  => 'true',
+			  'theme'  => null,
+			  'filter' => null,
+			  'name'   => null
 		),
 		$atts,
 		'metabase-embed'
@@ -156,7 +158,9 @@ function metabase_embed_shortcode( $atts ) {
     $token      = JWT::encode($payload, $secret_key, 'HS256');
     $iframeUrl  = $site_url . "/embed/dashboard/" . $token . metabase_embed_get_view_params($atts);
 
-	return '<iframe src="'.$iframeUrl.'" frameborder="0" width="'.$atts['width'].'" height="'.$atts['height'].'" loading="lazy" allowtransparency="true"></iframe>';
+	$iframeId = ($atts['name'] != null) ? 'id="'. $atts['name'] . '"' : '';
+
+	return '<iframe '.$iframeId.' src="'.$iframeUrl.'" frameborder="0" width="'.$atts['width'].'" height="'.$atts['height'].'" loading="lazy"></iframe>';
 }
 add_shortcode('metabase-embed', 'metabase_embed_shortcode');
 
