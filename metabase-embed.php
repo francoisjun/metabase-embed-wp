@@ -4,7 +4,7 @@
  * Plugin Name:       Metabase Embed
  * Plugin URI:        https://github.com/francoisjun/metabase-embed-wp/
  * Description:       Shortcode para incorporar dashboards do Metabase.
- * Version:           1.0.3
+ * Version:           1.0.4
  * Requires PHP:	  7.1
  * Author:            François Júnior
  * Author URI:        https://github.com/francoisjun/
@@ -67,6 +67,7 @@ function metabase_embed_menu_html() {
 function metabase_embed_settings_init() {
 	register_setting('metabase-embed-settings-group', 'metabase_site_url');
 	register_setting('metabase-embed-settings-group', 'metabase_secret_key');
+	register_setting('metabase-embed-settings-group', 'metabase_token_duration');
     	
 	add_settings_section(
         'metabase-embed-settings-section',
@@ -94,6 +95,14 @@ function metabase_embed_settings_init() {
 		'metabase-secret-key',
 		__('Chave Secreta', 'metabase-embed'), 
         'metabase_secret_key_html',
+		'metabase-embed-plugin',
+		'metabase-embed-settings-section'
+	);
+
+	add_settings_field(
+		'metabase-token-duration',
+		__('Tempo de Validade do Token', 'metabase-embed'), 
+        'metabase_token_duration_html',
 		'metabase-embed-plugin',
 		'metabase-embed-settings-section'
 	);
@@ -133,6 +142,11 @@ function metabase_secret_key_html() {
 	echo '<input name="metabase_secret_key" type="text" id="metabase_secret_key" class="regular-text" value="'.$secret_key.'">';
 }
 
+function metabase_token_duration_html() {
+	$time = esc_attr(get_option('metabase_token_duration'));
+	echo '<input type="number" id="metabase_token_duration" name="metabase_token_duration" class="small-text" min="1" max="24" value="'.$time.'"> hora(s)';
+}
+
 function metabase_embed_shortcode( $atts ) {
     $atts = array_change_key_case((array) $atts, CASE_LOWER);
 	$atts = shortcode_atts(
@@ -150,13 +164,17 @@ function metabase_embed_shortcode( $atts ) {
 		$atts,
 		'metabase-embed'
 	);
+	
+    $site_url       = esc_attr(get_option('metabase_site_url'));
+    $secret_key     = esc_attr(get_option('metabase_secret_key'));
+    $token_duration = esc_attr(get_option('metabase_token_duration'));
+	
+	$seconds_per_hour = 3600; //1h em segundos
 
-    $site_url   = esc_attr(get_option('metabase_site_url'));
-    $secret_key = esc_attr(get_option('metabase_secret_key'));
     $payload    = [
         'resource' => ['dashboard' => intval($atts['id'])],
         'params'   => new stdClass(),
-        'exp'      => time() + (10 * 60)
+        'exp'      => time() + ($token_duration * $seconds_per_hour)
     ]; 
 
     $token      = JWT::encode($payload, $secret_key, 'HS256');
