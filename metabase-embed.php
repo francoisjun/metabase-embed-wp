@@ -4,7 +4,7 @@
  * Plugin Name:       Metabase Embed
  * Plugin URI:        https://github.com/francoisjun/metabase-embed-wp/
  * Description:       Shortcode para incorporar dashboards do Metabase.
- * Version:           1.0.5
+ * Version:           1.0.6
  * Requires PHP:	  7.1
  * Author:            François Júnior
  * Author URI:        https://github.com/francoisjun/
@@ -14,7 +14,11 @@
  * Domain Path:       /languages
  */
 
-require 'vendor/autoload.php';
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+require __DIR__ . '/vendor/autoload.php';
 
 use Firebase\JWT\JWT;
 
@@ -35,7 +39,7 @@ function metabase_embed_menu() {
 	add_plugins_page(
 		__('Configurações do Metabase Embed', 'metabase-embed'),
 		__('Metabase Embed', 'metabase-embed'),
-		'read',
+		'manage_options',
 		'metabase-embed-plugin',
 		'metabase_embed_menu_html'
 	);
@@ -65,9 +69,21 @@ function metabase_embed_menu_html() {
 
 
 function metabase_embed_settings_init() {
-	register_setting('metabase-embed-settings-group', 'metabase_site_url');
-	register_setting('metabase-embed-settings-group', 'metabase_secret_key');
-	register_setting('metabase-embed-settings-group', 'metabase_token_duration');
+	register_setting('metabase-embed-settings-group', 'metabase_site_url', array(
+		'type'              => 'string',
+		'sanitize_callback' => 'esc_url_raw',
+		'default'           => '',
+	));
+	register_setting('metabase-embed-settings-group', 'metabase_secret_key', array(
+		'type'              => 'string',
+		'sanitize_callback' => 'metabase_embed_sanitize_secret_key',
+		'default'           => '',
+	));
+	register_setting('metabase-embed-settings-group', 'metabase_token_duration', array(
+		'type'              => 'integer',
+		'sanitize_callback' => 'metabase_embed_sanitize_token_duration',
+		'default'           => 1,
+	));
     	
 	add_settings_section(
         'metabase-embed-settings-section',
@@ -108,6 +124,29 @@ function metabase_embed_settings_init() {
 	);
 }
 
+function metabase_embed_sanitize_secret_key($value) {
+	$value = sanitize_text_field($value);
+
+	// Campo enviado em branco: mantém a chave já armazenada.
+	if ($value === '') {
+		return (string) get_option('metabase_secret_key', '');
+	}
+
+	return $value;
+}
+
+function metabase_embed_sanitize_token_duration($value) {
+	$value = absint($value);
+
+	if ($value < 1) {
+		$value = 1;
+	} elseif ($value > 24) {
+		$value = 24;
+	}
+
+	return $value;
+}
+
 function metabase_embed_settings_section_html() {
 	echo 'Informe as constantes de acesso ao servidor do Metabase';
 }
@@ -138,8 +177,11 @@ function metabase_site_url_html() {
 }
 
 function metabase_secret_key_html() {
-	$secret_key = esc_attr(get_option('metabase_secret_key'));
-	echo '<input name="metabase_secret_key" type="text" id="metabase_secret_key" class="regular-text" value="'.$secret_key.'">';
+	$has_key     = get_option('metabase_secret_key') !== '';
+	$placeholder = $has_key
+		? esc_attr__('•••••••• (chave já configurada — preencha para substituir)', 'metabase-embed')
+		: '';
+	echo '<input name="metabase_secret_key" type="password" autocomplete="off" id="metabase_secret_key" class="regular-text" value="" placeholder="'.$placeholder.'">';
 }
 
 function metabase_token_duration_html() {
@@ -165,26 +207,34 @@ function metabase_embed_shortcode( $atts ) {
 		'metabase-embed'
 	);
 	
-    $site_url       = esc_attr(get_option('metabase_site_url'));
-    $secret_key     = esc_attr(get_option('metabase_secret_key'));
-    $token_duration = esc_attr(get_option('metabase_token_duration'));
-	
+    $site_url       = esc_url_raw(get_option('metabase_site_url'));
+    $secret_key     = (string) get_option('metabase_secret_key');
+    $token_duration = absint(get_option('metabase_token_duration'));
+
+	if ($site_url === '' || $secret_key === '') {
+		return '';
+	}
+
+	if ($token_duration < 1) {
+		$token_duration = 1;
+	}
+
 	$seconds_per_hour = 3600; //1h em segundos
 
     $payload    = [
         'resource' => ['dashboard' => intval($atts['id'])],
         'params'   => new stdClass(),
         'exp'      => time() + ($token_duration * $seconds_per_hour)
-    ]; 
+    ];
 
     $token      = JWT::encode($payload, $secret_key, 'HS256');
-    $iframeUrl  = $site_url . "/embed/dashboard/" . $token . metabase_embed_get_view_params($atts);
+    $iframeUrl  = esc_url( rtrim($site_url, '/') . "/embed/dashboard/" . $token . metabase_embed_get_view_params($atts) );
 
-	$iframeId    = ($atts['name'] != null) ? 'id="'. $atts['name'] . '"' : '';
-	$iframeStyle = ($atts['style'] != null) ? 'class="'. $atts['style'] . '"' : '';
-	$iframeSrc   = ($atts['lazy']) ? 'data-src': 'src';
+	$iframeId    = ($atts['name'] != null) ? 'id="'. esc_attr($atts['name']) . '"' : '';
+	$iframeStyle = ($atts['style'] != null) ? 'class="'. esc_attr($atts['style']) . '"' : '';
+	$iframeSrc   = filter_var($atts['lazy'], FILTER_VALIDATE_BOOLEAN) ? 'data-src': 'src';
 
-	return '<iframe '.$iframeId.' '.$iframeStyle.' '.$iframeSrc.'="'.$iframeUrl.'" frameborder="0" width="'.$atts['width'].'" height="'.$atts['height'].'"></iframe>';
+	return '<iframe '.$iframeId.' '.$iframeStyle.' '.$iframeSrc.'="'.$iframeUrl.'" frameborder="0" width="'.esc_attr($atts['width']).'" height="'.esc_attr($atts['height']).'"></iframe>';
 }
 add_shortcode('metabase-embed', 'metabase_embed_shortcode');
 
@@ -206,7 +256,11 @@ function metabase_embed_get_view_params($atts) {
 	}
 
 	if(isset($atts['filter'])){
-		array_push($selected_params, $atts['filter']);
+		// Aceita apenas pares chave=valor separados por & (sem aspas, espaços ou < >).
+		$filter = (string) $atts['filter'];
+		if (preg_match('/^[A-Za-z0-9_\-]+=[^&"\'<>\s]*(&[A-Za-z0-9_\-]+=[^&"\'<>\s]*)*$/', $filter)) {
+			array_push($selected_params, $filter);
+		}
 	}
 
 	return '#' . implode('&', $selected_params);
