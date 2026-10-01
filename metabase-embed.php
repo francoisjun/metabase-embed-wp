@@ -221,11 +221,29 @@ function metabase_embed_shortcode( $atts ) {
 		$token_duration = 1;
 	}
 
+	// Filtro individual do usuário (cadastrado pelo administrador no perfil),
+	// enviado como parâmetro travado no JWT para que não possa ser alterado.
+	$params      = new stdClass();
+	$user_filter = (string) get_user_meta(get_current_user_id(), 'user_filter', true);
+
+	if (trim($user_filter) !== '') {
+		$decoded = metabase_parse_user_filter($user_filter);
+
+		// Filtro inválido: não exibe o painel, para não liberar os dados sem restrição.
+		if ($decoded === null) {
+			return '<p>Não foi possível carregar o painel. Contate o administrador.</p>';
+		}
+
+		if (!empty($decoded)) {
+			$params = (object) $decoded;
+		}
+	}
+
 	$seconds_per_hour = 3600; //1h em segundos
 
     $payload    = [
         'resource' => ['dashboard' => intval($atts['id'])],
-        'params'   => new stdClass(),
+        'params'   => $params,
         'exp'      => time() + ($token_duration * $seconds_per_hour)
     ];
 
