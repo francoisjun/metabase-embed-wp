@@ -1,0 +1,144 @@
+$primary-color: #3e4d74;
+$accent-color: #f39200;
+$purple-color: #2A1C66;
+$text-color: #f0f7ff;
+
+iframe {
+    background-color: white;
+}
+
+.button_set {
+    position: absolute;
+    top: 9em;
+    right: 1.5em;
+    display: flex;
+    gap: 5px;
+    flex-direction: column;
+    align-items: end;
+}
+
+.button {
+    display: inline-block;    
+    background-color: $primary-color;
+    color: $text-color !important;
+    padding: 0.7em 1.6em;
+    border-radius: 6px;
+    border-color: transparent;
+    cursor: pointer;
+    line-height: 1em;
+    text-align: center;
+    transition: background-color 250ms;
+
+    &.margin {
+        margin-block: 4px;
+    }
+
+    &:hover,
+    &:focus {
+        background-color: lighten($primary-color, 10%);
+    }
+
+    &.accent {
+        background-color: $accent-color;
+
+        &:hover,
+        &:focus {
+            background-color: darken($accent-color, 10%);
+        }
+    }
+
+    &.accent-dark {
+        background-color: darken($accent-color, 10%);
+
+        &:hover,
+        &:focus {
+            background-color: $accent-color;
+        }
+    }
+
+    &.purple {
+        background-color: $purple-color;
+        
+        &:hover,
+        &:focus {
+            background-color: lighten($purple-color, 10%);
+        }
+    }
+
+    &.float {
+        display: inline-block;
+        width: 34px;
+        white-space: nowrap;
+        padding: 6px;
+        overflow: hidden;
+        font-size: .8em;
+        transition: all 250ms;
+
+        &:hover {
+            width: 150px;
+
+            span {
+                display: initial;
+            }
+        }
+
+        img {
+            filter: invert(100%) sepia(0%) saturate(7500%) hue-rotate(294deg) brightness(105%) contrast(101%);
+            height: 18px;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: .5em;
+        }
+
+        span {
+            white-space: nowrap;
+            transition: left 0.3s;
+            display: none;
+        }
+    }
+}
+
+dialog {
+    position: relative;
+    max-width: 100ch;
+    border: 0.4em solid $primary-color;
+    border-radius: 0.7em;
+    padding: 1em;
+    margin: auto;
+
+    &::backdrop {
+        background-color: white;
+        opacity: 0.8;
+    }
+
+    article {
+        overflow-y: auto;
+        max-height: calc(100dvh - 11em);
+    }
+
+    form {
+        width: fit-content;
+        margin-inline: auto;
+        margin-top: 1em;
+        display: flex;
+        flex-direction: column;
+        .actions {
+            display: flex;
+            gap: 1.5em;
+            justify-content: center;
+            margin-top: 1em;
+            padding-top: 1em;
+            border-top: $primary-color solid 2px;
+        }
+
+        label {
+            display: block;
+        }
+        input {
+            display: inline-block;            
+        }
+        textarea {
+            resize: none;
+        }
+    }
+}

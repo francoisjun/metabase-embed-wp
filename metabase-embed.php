@@ -4,7 +4,7 @@
  * Plugin Name:       Metabase Embed
  * Plugin URI:        https://github.com/francoisjun/metabase-embed-wp/
  * Description:       Shortcode para incorporar dashboards do Metabase.
- * Version:           1.0.6
+ * Version:           1.2.1
  * Requires PHP:	  7.1
  * Author:            François Júnior
  * Author URI:        https://github.com/francoisjun/
@@ -22,13 +22,15 @@ require __DIR__ . '/vendor/autoload.php';
 
 use Firebase\JWT\JWT;
 
-function metabase_embed_activate() { 
+function metabase_embed_activate() {
+	metabase_setup_post_type(); 
 	flush_rewrite_rules(); 
 }
 register_activation_hook( __FILE__, 'metabase_embed_activate');
 
 
 function metabase_embed_deactivate() {
+	unregister_post_type('panels');
 	remove_shortcode('metabase-embed');
 	flush_rewrite_rules();
 }
@@ -39,7 +41,7 @@ function metabase_embed_menu() {
 	add_plugins_page(
 		__('Configurações do Metabase Embed', 'metabase-embed'),
 		__('Metabase Embed', 'metabase-embed'),
-		'manage_options',
+		'read',
 		'metabase-embed-plugin',
 		'metabase_embed_menu_html'
 	);
@@ -265,3 +267,383 @@ function metabase_embed_get_view_params($atts) {
 
 	return '#' . implode('&', $selected_params);
 }
+
+/**
+ * 
+ */
+
+/**
+ * Registrar custom post type 
+ */
+function metabase_setup_post_type()
+{
+    // tipo Painéis
+    $labels = array(
+        'name' => 'Painéis',
+        'singular_name' => 'Painel',
+        'add_new' => 'Adicionar Novo',
+        'add_new_item' => 'Adicionar Novo Painel',
+        'edit_item' => 'Editar Painel',
+        'new_item' => 'Novo Painel',
+        'view_item' => 'Ver Painel',
+        'item_published' => 'Painel Publicado',
+        'item_updated' => 'Painel Atualizado',
+        'not_found' => 'Nenhum Painel encontrado',
+        'not_found_in_trash' => 'Nenhum Painel encontrado na lixeira',
+        'all_items' => 'Todos os Painéis'
+    );
+
+    $args = array(
+        'labels' => $labels,
+        'description' => 'Painéis do Metabase',
+        'public' => true,
+        'exclude_from_search' => true,
+        'show_in_rest' => true,
+        'menu_position' => 21,
+        'menu_icon' => 'dashicons-chart-bar',
+        'supports' => array('title', 'editor'),
+        'taxonomies' => array('panels_group'),
+    );
+    register_post_type('panels', $args);
+
+    // Taxonomia para Painéis
+    $labels = array(
+        'name' => 'Grupo',
+        'singular_name' => 'Grupo',
+        'search_items'  => 'Pesquisar Grupos',
+        'all_items' => 'Todos os Grupos',
+        'edit_item' => 'Editar Grupo',
+        'view_item' => 'Visualizar Grupo',
+        'update_item' => 'Atualizar Grupo',
+        'add_new_item' => 'Adicionar Novo Grupo',
+        'not_found' => 'Nenhum Grupo encontrado',
+        'no_terms' => 'Nenhum Grupo',
+    );
+    $args = array(
+        'labels' => $labels,
+        'description' => 'Grupos de Painéis',
+        'public' => true,
+        'show_in_rest' => true,
+        'hierarchical' => true,
+        'show_admin_column' => true,
+        'show_tagcloud' => false,
+        'default_term' => array('name' => 'Sem Categoria', 'description' => 'Painéis que não serão exibidos automaticamente', 'slug' => 'sem-categoria'),
+    );
+    register_taxonomy('panels_group', 'panels', $args);
+}
+add_action('init', 'metabase_setup_post_type');
+
+
+/**
+ * Registrar Custom Meta Boxes: paineis
+ */
+function metabase_custom_box_panels()
+{
+    add_meta_box(
+        'paineis_box',
+        'Metabase',
+        'metabase_custom_box_panels_html',
+        'panels'
+    );
+}
+
+function metabase_custom_box_panels_html($post)
+{
+    $url = get_post_meta($post->ID, '_metabase_painel_url',  true);
+    $panelId = get_post_meta($post->ID, '_metabase_painel_id',  true);
+?>
+    <label for="metabase_painel_id"><strong>ID do painel (para uso com o plugin metabase-embed):</strong></label>
+    <input name="metabase_painel_id" type="number" min="1" class="large-text" id="metabase_painel_id" value="<?php echo esc_html($panelId); ?>">
+    <label for="metabase_painel_url">URL do painel público (será usado caso o ID do painel esteja vazio):</label>
+    <input name="metabase_painel_url" type="text" class="large-text" id="metabase_painel_url" value="<?php echo esc_html($url); ?>">
+<?php
+}
+
+add_action('add_meta_boxes', 'metabase_custom_box_panels');
+
+function metabase_custom_box_panels_save($post_id)
+{
+    if (array_key_exists('metabase_painel_url', $_POST)) {
+        update_post_meta(
+            $post_id,
+            '_metabase_painel_url',
+            sanitize_text_field($_POST['metabase_painel_url'])
+        );
+    }
+
+    if (array_key_exists('metabase_painel_id', $_POST)) {
+        update_post_meta(
+            $post_id,
+            '_metabase_painel_id',
+            sanitize_text_field($_POST['metabase_painel_id'])
+        );
+    }
+}
+add_action('save_post', 'metabase_custom_box_panels_save');
+
+
+/**
+ * Shortcode para exibir as abas de grupos
+ */
+function metabase_tabs_shortcode($atts = [], $content = null)
+{
+    if ($content) {
+        $short_codes = trim(strip_tags($content));
+        $short_codes = explode("\n", $short_codes);
+        $short_codes = array_filter($short_codes, function ($valor) {
+            return !empty($valor);
+        });
+
+        $tabs  = '<div id="metabase-tabs" class="metabase-tabs hide">';
+        $tabs .= '<ul>';
+
+        foreach ($short_codes as $index => $item) {
+            $shortcode_type = preg_match('/^\[(\w+-?\w+)/', $item, $matches) ? $matches[1] : '';
+            $slug = preg_match('/slug="([^"]+)"/', $item, $matches) ? $matches[1] : '';
+
+            if ($shortcode_type === 'panel') {
+                $args = array(
+                    'name'        => $slug,
+                    'post_type'   => 'panels',
+                    'post_status' => 'publish',
+                    'numberposts' => 1,
+                );
+                $term = get_posts($args)[0]->post_title;
+            } else {
+                $term = get_term_by('slug', $slug, 'panels_group')->name;
+            }
+            $tab_name = $term ? $term : 'Slug não encontrado';
+            $tabs .= '<li><a href="#tab-' . $index . '">' . $tab_name . '</a></li>';
+        }
+
+        $tabs .= '</ul>';
+
+        foreach ($short_codes as $index => $item) {
+            $tabs .=  '<div id="tab-' . $index . '">' . $item . '</div>';
+        }
+
+        $tabs .= '</div>';
+        $tabs .= '<script>jQuery(document).ready(function($){$("#metabase-tabs").tabs().removeClass("hide");})</script>';        
+        $tabs = do_shortcode($tabs);
+    } else {
+        $tabs = "Não foi encontrado o conteúdo. Use [metabase-tabs] [panel-group slug=\"grupo1\"] [panel-group slug=\"grupo2\"] [/metabase-tabs]";
+    }
+
+    return $tabs;
+}
+
+/**
+ * Shortcode para exibir os paineis do grupo em abas
+ */
+function metabase_panel_group_shortcode($atts = [], $content = null, $tag = '')
+{
+    $atts = array_change_key_case((array) $atts, CASE_LOWER);
+    $pg_atts = shortcode_atts(
+        array(
+            'slug' => 'sem-categoria',
+        ),
+        $atts,
+        $tag
+    );
+
+    $args = array(
+        'post_type'      => 'panels',
+        'posts_per_page' => 6,
+        'tax_query'      => array(
+            array(
+                'taxonomy'  => 'panels_group',
+                'field'     => 'slug',
+                'terms'     => $pg_atts['slug'],
+            ),
+        ),
+        'order'         => 'ASC',
+        'order_by'      => 'ID',
+    );
+    $loop = new WP_Query($args);
+    $group = array();
+    while ($loop->have_posts()) {
+        $loop->the_post();
+        $group[] = array(
+            'title' => get_the_title(),
+            'url' => get_post_meta(get_the_ID(), '_metabase_painel_url',  true),
+            'id' => get_post_meta(get_the_ID(), '_metabase_painel_id',  true),
+            'content' => get_the_content(),
+            'slug' => get_post_field('post_name')
+        );
+    }
+    wp_reset_postdata();
+
+    if (!empty($group)) {
+        $titles = '';
+        $panels = '';
+
+        foreach ($group as $index => $item) {
+            $dialogId = str_replace('-', '', $item['slug']);
+
+            $titles .= '<li><a href="#' . $pg_atts['slug'] . '-' . $index . '">' . $item['title'] . '</a></li>';
+
+            $panels .= '<div id="' . $pg_atts['slug'] . '-' . $index . '">';
+            $panels .= metabase_get_dialog_content($dialogId, $item['content'], $item['title']);
+            $panels .= metabase_get_panel_iframe($item['id'], $item['url'], $dialogId); 
+            $panels .= '</div>';
+        }
+
+        $tabs  = '<div id="metabase-subtabs-' . $pg_atts['slug'] . '" class="metabase-subtabs">';
+        $tabs .= '<ul>';
+        $tabs .= $titles;
+        $tabs .= '</ul>';
+        $tabs .= $panels;
+        $tabs .= '</div>';
+        $tabs .= '<script>jQuery(document).ready(function($){$("#metabase-subtabs-' . $pg_atts['slug'] . '").tabs();})</script>';
+    } else {
+        $tabs = "Não foi encontrado nenhum painel no grupo {$pg_atts['slug']}.";
+    }
+
+    return $tabs;
+}
+
+/**
+ * Shortcode para exibir um painel
+ */
+function metabase_panel_shortcode($atts = [], $content = null, $tag = '')
+{
+    $atts = array_change_key_case((array) $atts, CASE_LOWER);
+    $pg_atts = shortcode_atts(
+        array(
+            'slug' => 'default',
+        ),
+        $atts,
+        $tag
+    );
+
+    $args = array(
+        'name'        => $pg_atts['slug'],
+        'post_type'   => 'panels',
+        'post_status' => 'publish',
+        'numberposts' => 1,
+    );
+
+    $posts = get_posts($args)[0];
+
+    if ($posts) {
+        $panel_url = get_post_meta($posts->ID, '_metabase_painel_url', true);
+        $panel_id  = get_post_meta($posts->ID, '_metabase_painel_id', true);
+        $dialogId  = str_replace('-', '', $pg_atts['slug']);
+        $panel     = metabase_get_dialog_content($dialogId, $posts->post_content, $posts->post_title);
+        $panel    .= metabase_get_panel_iframe($panel_id, $panel_url, $dialogId);        
+    } else
+        $panel = "Não foi encontrado nenhum painel com o slug {$pg_atts['slug']}.";
+
+    return $panel;
+}
+
+function metabase_get_dialog_content($dialogId, $content, $panelName)
+{
+    if (!$dialogId)
+        return '';
+    
+    $html = '';
+    
+    if ($content) {
+        $html .= '<dialog id="' . $dialogId . '">';
+        $html .= '<article>' . $content . '</article>';
+        $html .= '<form method="dialog"><button class="button" title="Pressione a tecla ESC para fechar">Fechar</button></form></dialog>';
+    }
+
+    $html .= '<div class="button_set">';
+    
+    //botão tela cheia
+    $html .= '<button class="button float purple" onclick="showFullScreen(\'i-'. $dialogId .'\')">';
+    $html .= '<img src="' . plugins_url('assets/icon-expand.svg', __FILE__) . '">';
+    $html .= '<span> Tela Cheia</span></button>';
+
+    //botão sobre o painel
+    if($content) {
+        $html .= '<button class="button float" onclick="' . $dialogId . '.showModal()">';
+        $html .= '<img src="' . plugins_url('assets/icon-info.svg', __FILE__) . '">';
+        $html .= '<span> Sobre o Painel</span></button>';
+    }
+
+    //botão reportar problema
+    // $html .= '<button class="button float accent-dark" onclick="showReportDialog(\''. $panelName .'\')">';
+    // $html .= '<img src="' . plugins_url('assets/icon-megafone.svg', __FILE__) . '">';
+    // $html .= '<span> Relatar Problema</span></button>';
+
+    $html .= '</div>';
+
+    return $html;
+}
+
+function metabase_get_panel_iframe($panelId, $panelUrl, $panelName) {
+    if ($panelId >= 1)
+        return  do_shortcode("[metabase-embed id=$panelId height=100% border=false name=i-$panelName ]");
+    elseif ($panelUrl) 
+        return '<iframe id="i-'. $panelName .'" src="' . $panelUrl . '" frameborder="0" width="100%" height="100%" class="lazyload"></iframe>';
+    else
+        return '<p>Não foi cadastrado a URL pública nem o ID do painel</p>';
+}
+
+
+/**
+ * Filtro no cadastro de usuário
+ */
+
+if ( ! function_exists( 'metabase_show_user_field' )) :
+    // Adicionar campo personalizado ao perfil do usuário
+    function metabase_show_user_field($user) { 
+        if (current_user_can('administrator')) {?>
+            <h3>Metabase Embed</h3>
+            <table class="form-table">
+                <tr>
+                    <th><label for="user_filter">Filtro</label></th>
+                    <td>
+                        <textarea name="user_filter" id="user_filter" rows="5" cols="30" placeholder='"centro": [ "CCAE" ]'><?php echo esc_attr(get_the_author_meta('user_filter', $user->ID)); ?></textarea><br />
+                        <span class="description">Informe os filtros no formato JSON que deverão ser aplicados a todos os paineis acessados por este usuário.</span>
+                    </td>
+                </tr>
+            </table>
+            <?php 
+        }
+    }
+endif;
+
+add_action('show_user_profile', 'metabase_show_user_field');
+add_action('edit_user_profile', 'metabase_show_user_field');
+
+if ( ! function_exists( 'metabase_save_user_field' )) :
+    // Salvar o campo personalizado no perfil do usuário
+    function metabase_save_user_field($user_id) {
+        if (!current_user_can('edit_user', $user_id)) {
+            return false;
+        }
+        update_user_meta($user_id, 'user_filter', $_POST['user_filter']);
+    }
+endif;
+
+add_action('personal_options_update', 'metabase_save_user_field');
+add_action('edit_user_profile_update', 'metabase_save_user_field');
+
+
+/**
+ * Local central para criar todos os shortcodes.
+ */
+function metabase_shortcodes_init()
+{
+    add_shortcode('metabase-tabs', 'metabase_tabs_shortcode');
+    add_shortcode('panel-group', 'metabase_panel_group_shortcode');
+    add_shortcode('panel', 'metabase_panel_shortcode');
+}
+add_action('init', 'metabase_shortcodes_init');
+
+
+/**
+ * carregar os scripts
+ */
+function metabase_load_plugin_scripts()
+{
+    wp_enqueue_style('metabase-style', plugin_dir_url(__FILE__) . 'assets/css/style.css');
+
+    wp_enqueue_script('jquery-ui-tabs', '', array('jquery'));  
+    wp_enqueue_script('metabase-utils', plugin_dir_url(__FILE__) . 'assets/js/utils.js', array('jquery'), null, true);
+}
+add_action('wp_enqueue_scripts', 'metabase_load_plugin_scripts');
