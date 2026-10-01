@@ -41,7 +41,7 @@ function metabase_embed_menu() {
 	add_plugins_page(
 		__('Configurações do Metabase Embed', 'metabase-embed'),
 		__('Metabase Embed', 'metabase-embed'),
-		'read',
+		'manage_options',
 		'metabase-embed-plugin',
 		'metabase_embed_menu_html'
 	);
@@ -351,11 +351,12 @@ function metabase_custom_box_panels_html($post)
 {
     $url = get_post_meta($post->ID, '_metabase_painel_url',  true);
     $panelId = get_post_meta($post->ID, '_metabase_painel_id',  true);
+    wp_nonce_field('metabase_painel_save', 'metabase_painel_nonce');
 ?>
     <label for="metabase_painel_id"><strong>ID do painel (para uso com o plugin metabase-embed):</strong></label>
-    <input name="metabase_painel_id" type="number" min="1" class="large-text" id="metabase_painel_id" value="<?php echo esc_html($panelId); ?>">
+    <input name="metabase_painel_id" type="number" min="1" class="large-text" id="metabase_painel_id" value="<?php echo esc_attr($panelId); ?>">
     <label for="metabase_painel_url">URL do painel público (será usado caso o ID do painel esteja vazio):</label>
-    <input name="metabase_painel_url" type="text" class="large-text" id="metabase_painel_url" value="<?php echo esc_html($url); ?>">
+    <input name="metabase_painel_url" type="text" class="large-text" id="metabase_painel_url" value="<?php echo esc_attr($url); ?>">
 <?php
 }
 
@@ -363,19 +364,29 @@ add_action('add_meta_boxes', 'metabase_custom_box_panels');
 
 function metabase_custom_box_panels_save($post_id)
 {
+    if (!isset($_POST['metabase_painel_nonce']) ||
+        !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['metabase_painel_nonce'])), 'metabase_painel_save')) {
+        return;
+    }
+
+    if ((defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) || !current_user_can('edit_post', $post_id)) {
+        return;
+    }
+
     if (array_key_exists('metabase_painel_url', $_POST)) {
         update_post_meta(
             $post_id,
             '_metabase_painel_url',
-            sanitize_text_field($_POST['metabase_painel_url'])
+            esc_url_raw(wp_unslash($_POST['metabase_painel_url']))
         );
     }
 
     if (array_key_exists('metabase_painel_id', $_POST)) {
+        $panelId = absint($_POST['metabase_painel_id']);
         update_post_meta(
             $post_id,
             '_metabase_painel_id',
-            sanitize_text_field($_POST['metabase_painel_id'])
+            $panelId > 0 ? $panelId : ''
         );
     }
 }
@@ -408,12 +419,14 @@ function metabase_tabs_shortcode($atts = [], $content = null)
                     'post_status' => 'publish',
                     'numberposts' => 1,
                 );
-                $term = get_posts($args)[0]->post_title;
+                $found = get_posts($args);
+                $term  = $found ? $found[0]->post_title : '';
             } else {
-                $term = get_term_by('slug', $slug, 'panels_group')->name;
+                $found = get_term_by('slug', $slug, 'panels_group');
+                $term  = $found ? $found->name : '';
             }
             $tab_name = $term ? $term : 'Slug não encontrado';
-            $tabs .= '<li><a href="#tab-' . $index . '">' . $tab_name . '</a></li>';
+            $tabs .= '<li><a href="#tab-' . $index . '">' . esc_html($tab_name) . '</a></li>';
         }
 
         $tabs .= '</ul>';
@@ -474,29 +487,30 @@ function metabase_panel_group_shortcode($atts = [], $content = null, $tag = '')
     wp_reset_postdata();
 
     if (!empty($group)) {
-        $titles = '';
-        $panels = '';
+        $titles  = '';
+        $panels  = '';
+        $groupId = metabase_dom_id($pg_atts['slug']);
 
         foreach ($group as $index => $item) {
-            $dialogId = str_replace('-', '', $item['slug']);
+            $dialogId = metabase_dom_id(str_replace('-', '', $item['slug']));
 
-            $titles .= '<li><a href="#' . $pg_atts['slug'] . '-' . $index . '">' . $item['title'] . '</a></li>';
+            $titles .= '<li><a href="#' . $groupId . '-' . $index . '">' . esc_html($item['title']) . '</a></li>';
 
-            $panels .= '<div id="' . $pg_atts['slug'] . '-' . $index . '">';
+            $panels .= '<div id="' . $groupId . '-' . $index . '">';
             $panels .= metabase_get_dialog_content($dialogId, $item['content'], $item['title']);
             $panels .= metabase_get_panel_iframe($item['id'], $item['url'], $dialogId); 
             $panels .= '</div>';
         }
 
-        $tabs  = '<div id="metabase-subtabs-' . $pg_atts['slug'] . '" class="metabase-subtabs">';
+        $tabs  = '<div id="metabase-subtabs-' . $groupId . '" class="metabase-subtabs">';
         $tabs .= '<ul>';
         $tabs .= $titles;
         $tabs .= '</ul>';
         $tabs .= $panels;
         $tabs .= '</div>';
-        $tabs .= '<script>jQuery(document).ready(function($){$("#metabase-subtabs-' . $pg_atts['slug'] . '").tabs();})</script>';
+        $tabs .= '<script>jQuery(document).ready(function($){$("#metabase-subtabs-' . $groupId . '").tabs();})</script>';
     } else {
-        $tabs = "Não foi encontrado nenhum painel no grupo {$pg_atts['slug']}.";
+        $tabs = 'Não foi encontrado nenhum painel no grupo ' . esc_html($pg_atts['slug']) . '.';
     }
 
     return $tabs;
@@ -523,18 +537,27 @@ function metabase_panel_shortcode($atts = [], $content = null, $tag = '')
         'numberposts' => 1,
     );
 
-    $posts = get_posts($args)[0];
+    $found = get_posts($args);
+    $posts = $found ? $found[0] : null;
 
     if ($posts) {
         $panel_url = get_post_meta($posts->ID, '_metabase_painel_url', true);
         $panel_id  = get_post_meta($posts->ID, '_metabase_painel_id', true);
-        $dialogId  = str_replace('-', '', $pg_atts['slug']);
+        $dialogId  = metabase_dom_id(str_replace('-', '', $pg_atts['slug']));
         $panel     = metabase_get_dialog_content($dialogId, $posts->post_content, $posts->post_title);
         $panel    .= metabase_get_panel_iframe($panel_id, $panel_url, $dialogId);        
     } else
-        $panel = "Não foi encontrado nenhum painel com o slug {$pg_atts['slug']}.";
+        $panel = 'Não foi encontrado nenhum painel com o slug ' . esc_html($pg_atts['slug']) . '.';
 
     return $panel;
+}
+
+/**
+ * Mantém apenas caracteres seguros para uso em IDs do HTML e seletores JS.
+ */
+function metabase_dom_id($value)
+{
+    return preg_replace('/[^A-Za-z0-9_-]/', '', (string) $value);
 }
 
 function metabase_get_dialog_content($dialogId, $content, $panelName)
@@ -546,7 +569,7 @@ function metabase_get_dialog_content($dialogId, $content, $panelName)
     
     if ($content) {
         $html .= '<dialog id="' . $dialogId . '">';
-        $html .= '<article>' . $content . '</article>';
+        $html .= '<article>' . wp_kses_post($content) . '</article>';
         $html .= '<form method="dialog"><button class="button" title="Pressione a tecla ESC para fechar">Fechar</button></form></dialog>';
     }
 
@@ -554,13 +577,13 @@ function metabase_get_dialog_content($dialogId, $content, $panelName)
     
     //botão tela cheia
     $html .= '<button class="button float purple" onclick="showFullScreen(\'i-'. $dialogId .'\')">';
-    $html .= '<img src="' . plugins_url('assets/icon-expand.svg', __FILE__) . '">';
+    $html .= '<img src="' . esc_url(plugins_url('assets/icon-expand.svg', __FILE__)) . '">';
     $html .= '<span> Tela Cheia</span></button>';
 
     //botão sobre o painel
     if($content) {
-        $html .= '<button class="button float" onclick="' . $dialogId . '.showModal()">';
-        $html .= '<img src="' . plugins_url('assets/icon-info.svg', __FILE__) . '">';
+        $html .= '<button class="button float" onclick="document.getElementById(\'' . $dialogId . '\').showModal()">';
+        $html .= '<img src="' . esc_url(plugins_url('assets/icon-info.svg', __FILE__)) . '">';
         $html .= '<span> Sobre o Painel</span></button>';
     }
 
@@ -575,10 +598,13 @@ function metabase_get_dialog_content($dialogId, $content, $panelName)
 }
 
 function metabase_get_panel_iframe($panelId, $panelUrl, $panelName) {
+    $panelId   = absint($panelId);
+    $panelName = metabase_dom_id($panelName);
+
     if ($panelId >= 1)
         return  do_shortcode("[metabase-embed id=$panelId height=100% border=false name=i-$panelName ]");
     elseif ($panelUrl) 
-        return '<iframe id="i-'. $panelName .'" src="' . $panelUrl . '" frameborder="0" width="100%" height="100%" class="lazyload"></iframe>';
+        return '<iframe id="i-'. esc_attr($panelName) .'" src="' . esc_url($panelUrl) . '" frameborder="0" width="100%" height="100%" class="lazyload"></iframe>';
     else
         return '<p>Não foi cadastrado a URL pública nem o ID do painel</p>';
 }
@@ -591,13 +617,13 @@ function metabase_get_panel_iframe($panelId, $panelUrl, $panelName) {
 if ( ! function_exists( 'metabase_show_user_field' )) :
     // Adicionar campo personalizado ao perfil do usuário
     function metabase_show_user_field($user) { 
-        if (current_user_can('administrator')) {?>
+        if (current_user_can('edit_users')) {?>
             <h3>Metabase Embed</h3>
             <table class="form-table">
                 <tr>
                     <th><label for="user_filter">Filtro</label></th>
                     <td>
-                        <textarea name="user_filter" id="user_filter" rows="5" cols="30" placeholder='"centro": [ "CCAE" ]'><?php echo esc_attr(get_the_author_meta('user_filter', $user->ID)); ?></textarea><br />
+                        <textarea name="user_filter" id="user_filter" rows="5" cols="30" placeholder='"centro": [ "CCAE" ]'><?php echo esc_textarea(get_the_author_meta('user_filter', $user->ID)); ?></textarea><br />
                         <span class="description">Informe os filtros no formato JSON que deverão ser aplicados a todos os paineis acessados por este usuário.</span>
                     </td>
                 </tr>
@@ -612,13 +638,62 @@ add_action('edit_user_profile', 'metabase_show_user_field');
 
 if ( ! function_exists( 'metabase_save_user_field' )) :
     // Salvar o campo personalizado no perfil do usuário
+    // Apenas quem gerencia usuários pode alterar o filtro (inclusive o próprio)
     function metabase_save_user_field($user_id) {
-        if (!current_user_can('edit_user', $user_id)) {
+        if (!current_user_can('edit_users') || !current_user_can('edit_user', $user_id)) {
             return false;
         }
-        update_user_meta($user_id, 'user_filter', $_POST['user_filter']);
+
+        if (!isset($_POST['user_filter'])) {
+            return false;
+        }
+
+        $filter = trim(wp_unslash($_POST['user_filter']));
+
+        if ($filter === '') {
+            delete_user_meta($user_id, 'user_filter');
+            return true;
+        }
+
+        $decoded = metabase_parse_user_filter($filter);
+        if ($decoded === null) {
+            return false; // erro já reportado em metabase_validate_user_field
+        }
+
+        update_user_meta($user_id, 'user_filter', wp_json_encode($decoded));
     }
 endif;
+
+/**
+ * Converte o filtro do usuário em array. Aceita o JSON com ou sem as chaves externas.
+ * Retorna null se o conteúdo não for um objeto JSON válido.
+ */
+function metabase_parse_user_filter($filter)
+{
+    $filter = trim((string) $filter);
+
+    if (substr($filter, 0, 1) !== '{') {
+        $filter = '{' . $filter . '}';
+    }
+
+    $decoded = json_decode($filter, true);
+
+    return is_array($decoded) ? $decoded : null;
+}
+
+function metabase_validate_user_field($errors, $update, $user)
+{
+    if (!current_user_can('edit_users') || !isset($_POST['user_filter'])) {
+        return;
+    }
+
+    $filter = trim(wp_unslash($_POST['user_filter']));
+
+    if ($filter !== '' && metabase_parse_user_filter($filter) === null) {
+        $errors->add('user_filter', '<strong>Erro:</strong> o filtro do Metabase não é um JSON válido.');
+    }
+}
+add_action('user_profile_update_errors', 'metabase_validate_user_field', 10, 3);
 
 add_action('personal_options_update', 'metabase_save_user_field');
 add_action('edit_user_profile_update', 'metabase_save_user_field');
